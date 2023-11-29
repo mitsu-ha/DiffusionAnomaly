@@ -28,8 +28,11 @@ device = 'cuda'
 
 def convert_to_windows(data, n_window):
     windows = list(torch.split(data, n_window))
+    
+    # print(ten.shape(windows), n_window)
     for i in range (n_window-windows[-1].shape[0]):
         windows[-1] = torch.cat((windows[-1], windows[-1][-1].unsqueeze(0)))
+    # print(np.shape(torch.stack(windows)))
     return torch.stack(windows)
 
 # parametri: point_global, point_contextual etc
@@ -53,38 +56,21 @@ def load_model(training_mode, lr, window_size, p1, p2, dims, batch_size, noise_s
     model = None
     diffusion_training_net = ConditionalDiffusionTrainingNetwork(dims, int(window_size), batch_size, noise_steps, denoise_steps).float()
     diffusion_prediction_net = ConditionalDiffusionTrainingNetwork(dims, int(window_size), batch_size, noise_steps, denoise_steps, train=False).float()
-    if training_mode == 'both':
-        if args.model == 'Autoencoder_Diffusion':
-            model = Autoencoder_Diffusion(dims, float(lr), int(window_size), p1, p2).float()
-        elif args.model == 'TransformerBasicBottleneckScaling': 
-            model = TransformerBasicBottleneckScaling(dims, float(lr), int(window_size), batch_size).float()
-        else:
-            model = TransformerBasicv2Scaling(dims, float(lr), int(window_size)).float()
-        optimizer = torch.optim.Adam(list(model.parameters()) + list(diffusion_training_net.parameters()), lr=model.lr)
-        # AE size
-        # param_size = 0
-        # for param in model.parameters():
-        #     param_size += param.nelement() * param.element_size()
-        # buffer_size = 0
-        # for buffer in model.buffers():
-        #     buffer_size += buffer.nelement() * buffer.element_size()
-        # size_all_mb = (param_size + buffer_size) / 1024**2
-        # print('model size: {:.3f}MB'.format(size_all_mb))
-    else:
-        optimizer = torch.optim.Adam(diffusion_training_net.parameters(), lr=float(lr))
-        # DIFFUSION size
-        # param_size = 0
-        # for name, param in diffusion_training_net.named_parameters():
-        #     param_size += param.nelement() * param.element_size()
-        #     print(f'{name} {param.size()}')
-        # buffer_size = 0
-        # for buffer in diffusion_training_net.buffers():
-        #     buffer_size += buffer.nelement() * buffer.element_size()
-        # size_all_mb = (param_size + buffer_size) / 1024**2
-        # print('diffusion size: {:.3f}MB'.format(size_all_mb))
+
+    optimizer = torch.optim.Adam(diffusion_training_net.parameters(), lr=float(lr))
+    # DIFFUSION size
+    # param_size = 0
+    # for name, param in diffusion_training_net.named_parameters():
+    #     param_size += param.nelement() * param.element_size()
+    #     print(f'{name} {param.size()}')
+    # buffer_size = 0
+    # for buffer in diffusion_training_net.buffers():
+    #     buffer_size += buffer.nelement() * buffer.element_size()
+    # size_all_mb = (param_size + buffer_size) / 1024**2
+    # print('diffusion size: {:.3f}MB'.format(size_all_mb))
     return model, diffusion_training_net, diffusion_prediction_net, optimizer, scheduler
 
-CHECKPOINT_FOLDER = '/anomaly-mts/a-mts/checkpoints'
+CHECKPOINT_FOLDER = 'anomaly-mts/a-mts/checkpoints'
 def save_model(model, experiment, diffusion_training_net, optimizer, scheduler, anomaly_score, epoch, diff_loss, ae_loss):
     folder = f'{CHECKPOINT_FOLDER}/{experiment}/'
     os.makedirs(folder, exist_ok=True)
@@ -129,7 +115,9 @@ def get_diffusion_sample(diffusion_prediction_net, conditioner, k):
 
 def backprop(epoch, model, diffusion_training_net, diffusion_prediction_net, data, diff_lambda, optimizer, scheduler, training_mode, anomaly_score, k, training = True):
     l = nn.MSELoss(reduction = 'none')
-    data_x = torch.tensor(data, dtype=torch.float32); dataset = TensorDataset(data_x, data_x)
+    data_x = torch.tensor(data, dtype=torch.float32); 
+    dataset = TensorDataset(data_x, data_x)
+    # print(np.shape(data_x))
     bs = diffusion_training_net.batch_size if not model else model.batch
     dataloader = DataLoader(dataset, batch_size = bs)
     w_size = diffusion_training_net.window_size
@@ -140,10 +128,9 @@ def backprop(epoch, model, diffusion_training_net, diffusion_prediction_net, dat
     # all_mins = []
     # all_maxs = []
     if training:
-        if training_mode == 'both':
-            model.train()
         diffusion_training_net.train()
         for d, _ in dataloader:
+            # print(np.shape(d))
             ##### Clean trend datset here 
             """mins = torch.min(d[:, :, 0], dim=1)
             maxs = torch.max(d[:, :, 0], dim=1)
@@ -160,26 +147,12 @@ def backprop(epoch, model, diffusion_training_net, diffusion_prediction_net, dat
             else:
                 window = d
             window = window.to(device)
-            if training_mode == 'both':
-                if args.model == 'Autoencoder_Diffusion':
-                    ae_reconstruction = model(window)
-                else:
-                    ae_reconstruction = model(window, window)
-                # B x (feats * win)
-                ae_loss = l(ae_reconstruction, window)
-                ae_reconstruction = ae_reconstruction.reshape(-1, w_size, feats)
-                # un tensor cu un element
-                diffusion_loss, _ = diffusion_training_net(ae_reconstruction)
-                ae_losses.append(torch.mean(ae_loss).item())
-                diff_losses.append(torch.mean(diffusion_loss).item())
-                if e < 5:
-                    loss = torch.mean(ae_loss)
-                else:
-                    loss = diff_lambda * diffusion_loss + torch.mean(ae_loss)
-            else:
-                # diff only
-                window = window.reshape(-1, w_size, feats)
-                loss, _ = diffusion_training_net(window)
+            
+            # diff only
+            # print(np.shape(window))
+            window = window.reshape(-1, w_size, feats)
+            # print(np.shape(window))
+            loss, _ = diffusion_training_net(window)
             l1s.append(loss.item())
             optimizer.zero_grad()
             loss.backward()                                                                                                     
@@ -190,8 +163,7 @@ def backprop(epoch, model, diffusion_training_net, diffusion_prediction_net, dat
         return np.mean(l1s), np.mean(ae_losses), np.mean(diff_losses)
     else:
         with torch.no_grad():
-            if training_mode == 'both':
-                model.eval()
+
             diffusion_prediction_net.load_state_dict(diffusion_training_net.state_dict())
             diffusion_prediction_net.eval()
             diffusion_training_net.eval()
@@ -208,43 +180,14 @@ def backprop(epoch, model, diffusion_training_net, diffusion_prediction_net, dat
                     window = d
                 window = window.to(device)
                 window_reshaped = window.reshape(-1, w_size, feats)
-                if training_mode == 'both':
-                    if args.model == 'Autoencoder_Diffusion':
-                        ae_reconstruction = model(window)
-                    else:
-                        ae_reconstruction = model(window, window)
-                    ae_reconstruction_reshaped = ae_reconstruction.reshape(-1, w_size, feats)
-                    recons.append(ae_reconstruction_reshaped)
-                    ae_loss = l(ae_reconstruction, window)
-                    ae_losses.append(torch.mean(ae_loss).item())
-                    _, diff_sample = diffusion_prediction_net(ae_reconstruction_reshaped)
-                    diff_sample = torch.squeeze(diff_sample, 1)
-                    diffusion_loss = l(diff_sample, window_reshaped)
-                    diffusion_loss = torch.mean(diffusion_loss).item()
-                    sum_losses.append(torch.mean(ae_loss).item() + diffusion_loss)
-                    diff_losses.append(diffusion_loss)
-                    samples.append(diff_sample)
-                    if anomaly_score == 'both': # 1
-                        loss = l(diff_sample, ae_reconstruction_reshaped)
-                    elif anomaly_score == 'diffusion': # 3
-                        loss = l(diff_sample, window_reshaped)
-                    elif anomaly_score == 'autoencoder': # 2
-                        loss = l(ae_reconstruction, window)
-                    elif anomaly_score == 'sum': # 4 = 2 + 3
-                        loss = l(ae_reconstruction, window) + l(window, diff_sample)
-                    elif anomaly_score == 'sum2': # 5 = 1 + 2
-                        loss = l(diff_sample, ae_reconstruction) + l(ae_reconstruction, window)
-                    elif anomaly_score == 'diffusion2': # 6 - 3 conditionat de gt
-                        diff_sample = get_diffusion_sample(diffusion_prediction_net, window_reshaped, k)
-                        loss = l(diff_sample, window_reshaped)
-                else:
-                    _, x_recon = diffusion_prediction_net(window_reshaped)
-                    x_recon = torch.squeeze(x_recon, 1)
-                    samples.append(x_recon)
-                    loss = l(x_recon, window_reshaped)
+                _, x_recon = diffusion_prediction_net(window_reshaped)
+                # x_recon = torch.squeeze(x_recon, 1)
+                x_recon = x_recon.transpose(2,1)
+                # print(np.shape(x_recon))
+                # print(np.shape(window_reshaped))
+                samples.append(x_recon)
+                loss = l(x_recon, window_reshaped)
                 l1s.append(loss)
-        if training_mode == 'both':
-            return torch.cat(l1s).detach().cpu().numpy(), np.mean(sum_losses), np.mean(ae_losses), np.mean(diff_losses), torch.cat(samples).detach().cpu().numpy(), torch.cat(recons).detach().cpu().numpy()
         return torch.cat(l1s).detach().cpu().numpy(), np.mean(sum_losses), np.mean(ae_losses), np.mean(diff_losses), torch.cat(samples).detach().cpu().numpy()
 
 if __name__ == '__main__':
@@ -395,12 +338,13 @@ if __name__ == '__main__':
         experiment += f'_{anomaly_scores[0]}_score' 
     #experiment += f'_{args.id}'   
 
-    wandb.init(project="anomaly-mts", entity="yourname", config=config, group=args.group)
+    wandb.init(project="anomaly-mts", config=config, group=args.group)
     wandb.run.name = experiment
     
     dataset_name = args.dataset
     part = None if not args.file else args.file
     training_mode = 'both' if not args.training else args.training
+    print(training_mode)
     anomaly_score = None if not args.anomaly_score else args.anomaly_score
     window_size = int(args.window_size)
     synthetic_datasets = ['point_global', 'point_contextual', 'pattern_shapelet', 'pattern_seasonal', 'pattern_trend', 'all_types', 'pattern_trendv2']
@@ -455,80 +399,38 @@ if __name__ == '__main__':
                 'diff_loss_train': diff_loss,
                 'epoch': e
             }, step=e)
-            if training_mode == 'both':
-                for idx, a_score in enumerate(anomaly_scores):
-                    if ae_loss + diff_loss < 0.15:
-                        loss0, val_loss, ae_loss_val, diff_loss_val, samples, recons = backprop(e, model, diffusion_training_net, diffusion_prediction_net, validationD, args.diff_lambda, optimizer, scheduler, training_mode, a_score, args.k, training=False)
-                        if idx == 0:    
-                            wandb.log({
-                                'sum_loss_val': val_loss,
-                                'ae_loss_val': ae_loss_val,
-                                'diff_loss_val': diff_loss_val,
-                                'epoch': e
-                            }, step=e)
-                        loss0 = loss0.reshape(-1,feats)
-
-                        lossFinal = np.mean(np.array(loss0), axis=1)
-                        labelsFinal = (np.sum(validation_labels, axis=1) >= 1) + 0
-
-                        result, fprs, tprs = evaluate(lossFinal, labelsFinal)
-                        result_roc = result["ROC/AUC"]
-                        result_f1 = result["f1"]
-                        wandb.log({'roc': result_roc, 'f1': result_f1}, step=e)
-                        if result_roc > max_roc_scores[idx][0]:
-                            max_roc_scores[idx] = [result_roc, result_f1, e]
-                            wandb.run.summary["f1_for_best_roc"] = result_f1
-                            wandb.run.summary["best_roc"] = result_roc
-                            wandb.run.summary["best_roc_epoch"] = e
-                        if result_f1 > max_f1_scores[idx][1]:
-                            max_f1_scores[idx] = [result_roc, result_f1, e]
-                            save_model(model, experiment, diffusion_training_net, optimizer, None, a_score, e, diff_loss, ae_loss)
-                            validation_thresh = result['threshold']
-                            wandb.run.summary["best_f1"] = result_f1
-                            wandb.run.summary["roc_for_best_f1"] = result_roc
-                            wandb.run.summary["best_roc_epoch"] = e
-                            wandb.run.summary["best_f1_epoch"] = e
-                            wandb.run.summary["f1_pa"] = result['f1_max'] 
-                            wandb.run.summary["roc_pa"] = result['roc_max']
-                        if e % 100 == 0: 
-                            for dim in range(0, feats):
-                                fig = plotter(experiment, a_score, validationD.reshape(-1, feats), lossFinal, labelsFinal, result, recons.reshape(-1, feats), samples.reshape(-1, feats), None, dim=dim, plot_test=True, epoch=e)
-                        if args.v:
-                            print(str(e) + ' ROC: ' + str(result_roc) + ' F1: ' + str(result_f1) + '\n')
-                    
-            else:
-                if train_loss < 0.15:
-                    loss0, _, _, val_loss, samples = backprop(e, model, diffusion_training_net, diffusion_prediction_net, validationD, args.diff_lambda, optimizer, scheduler, training_mode, args.anomaly_score, args.k, training=False)
-                    wandb.log({'val_loss': loss0.mean(), 'epoch': e}, step=e)
-                    loss0 = loss0.reshape(-1,feats)
-                    lossFinal = np.mean(np.array(loss0), axis=1)
-                    labelsFinal = (np.sum(validation_labels, axis=1) >= 1) + 0
-                    result, fprs, tprs = evaluate(lossFinal, labelsFinal)
-                    result_roc = result["ROC/AUC"]
-                    result_f1 = result["f1"]
-                    wandb.log({'roc': result_roc, 'f1': result_f1}, step=e)
-                    if result_f1 > f1_max:
-                        save_model(None, experiment, diffusion_prediction_net, optimizer, None, -1, e, train_loss, None)
-                        f1_max = result_f1
-                        validation_thresh = result['threshold']
-                        wandb.run.summary["best_f1"] = f1_max
-                        wandb.run.summary["roc_for_best_f1"] = result_roc
-                        wandb.run.summary["best_f1_epoch"] = e
-                        wandb.run.summary["validation_thresh"] = validation_thresh
-                    if result_roc > roc_max:
-                        roc_max = result_roc 
-                        wandb.run.summary["f1_for_best_roc"] = result_f1
-                        wandb.run.summary["best_roc"] = roc_max
-                        wandb.run.summary["best_roc_epoch"] = e
-                    wandb.log({'roc': result_roc, 'f1': result_f1}, step=e)
-                    if e % 100 == 0:
-                        for dim in range(0, feats):
-                            plotter(f'{experiment}_VAL', args.dataset, validationD.reshape(-1, feats), lossFinal, labelsFinal, result, None, samples.reshape(-1, feats), None, dim=dim, plot_test=True, epoch=e)
-                    if args.v:
-                        print(f"testing loss #{e}: {loss0.mean()}")
-                        # print(f"training loss #{e}: {loss1.mean()}")
-                        print(f"final ROC #{e}: {result_roc}")
-                        print(f"F1 #{e}: {result_f1}")
+            if train_loss < 0.15:
+                loss0, _, _, val_loss, samples = backprop(e, model, diffusion_training_net, diffusion_prediction_net, validationD, args.diff_lambda, optimizer, scheduler, training_mode, args.anomaly_score, args.k, training=False)
+                wandb.log({'val_loss': loss0.mean(), 'epoch': e}, step=e)
+                loss0 = loss0.reshape(-1,feats)
+                lossFinal = np.mean(np.array(loss0), axis=1)
+                labelsFinal = (np.sum(validation_labels, axis=1) >= 1) + 0
+                result, fprs, tprs = evaluate(lossFinal, labelsFinal)
+                result_roc = result["ROC/AUC"]
+                result_f1 = result["f1"]
+                wandb.log({'roc': result_roc, 'f1': result_f1}, step=e)
+                if result_f1 > f1_max:
+                    save_model(None, experiment, diffusion_prediction_net, optimizer, None, -1, e, train_loss, None)
+                    f1_max = result_f1
+                    validation_thresh = result['threshold']
+                    wandb.run.summary["best_f1"] = f1_max
+                    wandb.run.summary["roc_for_best_f1"] = result_roc
+                    wandb.run.summary["best_f1_epoch"] = e
+                    wandb.run.summary["validation_thresh"] = validation_thresh
+                if result_roc > roc_max:
+                    roc_max = result_roc 
+                    wandb.run.summary["f1_for_best_roc"] = result_f1
+                    wandb.run.summary["best_roc"] = roc_max
+                    wandb.run.summary["best_roc_epoch"] = e
+                wandb.log({'roc': result_roc, 'f1': result_f1}, step=e)
+                if e % 100 == 0:
+                    for dim in range(0, feats):
+                        plotter(f'{experiment}_VAL', args.dataset, validationD.reshape(-1, feats), lossFinal, labelsFinal, result, None, samples.reshape(-1, feats), None, dim=dim, plot_test=True, epoch=e)
+                if args.v:
+                    print(f"testing loss #{e}: {loss0.mean()}")
+                    # print(f"training loss #{e}: {loss1.mean()}")
+                    print(f"final ROC #{e}: {result_roc}")
+                    print(f"F1 #{e}: {result_f1}")
 
     # TEST ON TEST SET
     #load model from checkpoint

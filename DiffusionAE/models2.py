@@ -9,7 +9,7 @@ from src.dlutils import *
 from unet2 import Unet
 from scipy import stats
 from diffusion_module2 import p_losses, sample
-
+from denoising_diffusion_pytorch_1d import Unet1D
 device = 'cuda'
 	
 
@@ -53,6 +53,7 @@ class Autoencoder_Diffusion(nn.Module):
 
 
 class ConditionalDiffusionTrainingNetwork(nn.Module):
+
 	def __init__(self,nr_feats, window_size, batch_size, noise_steps, denoise_steps, train=True):
 		super().__init__()
 		self.dim = min(nr_feats, 16)
@@ -64,13 +65,21 @@ class ConditionalDiffusionTrainingNetwork(nn.Module):
 		self.timesteps = noise_steps
 		self.denoise_steps = denoise_steps
 
-		self.denoise_fn = Unet(dim=self.dim, channels=1, resnet_block_groups=1, init_size=torch.Size([self.dim, self.window_size, self.nr_feats]))
+		# self.denoise_fn = Unet(dim=self.dim, channels=1, resnet_block_groups=1, init_size=torch.Size([self.dim, self.window_size, self.nr_feats]))
+		self.denoise_fn = model = Unet1D(
+			dim = 64,
+			dim_mults = (1, 2, 4, 8),
+			channels = nr_feats
+		)
 
 	def forward(self, x):
 		diffusion_loss = None
 		x_recon = None
 
-		x = x.reshape(-1,  1, self.window_size, self.nr_feats)		
+		# x = x.reshape(-1,  1, self.window_size, self.nr_feats)		
+		# print(self.nr_feats)
+		x = x.transpose(2,1)
+		# print(np.shape(x))
 		if self.training:
 			t = torch.randint(0, self.timesteps, (x.shape[0],), device=device).long()
 			diffusion_loss = p_losses(self.denoise_fn, x, t)

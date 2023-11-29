@@ -282,6 +282,9 @@ class Unet(nn.Module):
         input_channels = channels * (2 if self_condition else 1)
 
         init_dim = default(init_dim, dim)
+        # print(input_channels)
+        # print(init_dim)
+        # print(init_size)
         self.init_conv = nn.Conv2d(input_channels, init_dim, 1, padding=0) # changed to 1 and 0 from 7,3
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
@@ -351,6 +354,8 @@ class Unet(nn.Module):
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     def forward(self, x, time, x_self_cond=None):
+        import numpy as np
+        # print(np.shape(x))
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim=1)

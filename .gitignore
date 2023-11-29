@@ -1,5 +1,7 @@
 runs/
 pycache/
+anomaly-mts/
+wandb/
 *.out
 *.pyc
 *.txt
@@ -8,3 +10,5 @@ pycache/
 *.csv
 *.xlsx
 *.pt
+
+# *.*
